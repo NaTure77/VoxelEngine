@@ -30,10 +30,11 @@ public class OptionUI2 : MonoBehaviour
         {
             lightToggle.isOn = !lightToggle.isOn;
         };
+
 #if UNITY_IOS
         //Controller3.instance.SetGamepadMode(true);
-        if (importButton == null) return;
        // importButton.gameObject.SetActive(true);
+        if (importButton == null) return;
         importButton.onClick.AddListener(() =>
             {
                 string[] extensionList = {"public.plain-text", "public.item"};
@@ -52,6 +53,7 @@ public class OptionUI2 : MonoBehaviour
         });
 #else
         hudToggle.isOn = false;
+        if (importButton == null) return;
         importButton.onClick.AddListener(() =>
         {
             string[] extensionList = { "public.plain-text", "public.item" };
