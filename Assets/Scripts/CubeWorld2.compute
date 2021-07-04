@@ -1,0 +1,328 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel Kernel1
+//#pragma kernel Kernel2
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+struct DataNode
+{
+    float3 color;
+    uint subNodes[8];
+};
+
+bool circleShape;
+bool gridEnabled;
+bool lightEnabled;
+
+float3 lightPos;
+
+RWTexture2D<float4> Result;
+#define MAX_STEPS 400
+float3 _Position;
+float3 _Rotation;
+float3 lightColor;
+int mapSize;
+int voxelLevel = 0;
+RWStructuredBuffer<DataNode> octree;
+RWBuffer<int> scales;//2, 4, 8, 16, 32, 64, 128, 256, 512, 1024 
+RWStructuredBuffer<float3> childDirection;
+
+int ResolutionX;
+int ResolutionY;
+
+bool DrawGrid2(float3 localPos,  float scale, float dist, float thick)
+{
+    float thickness = dist * thick;
+    scale = scale * 0.5 - thickness;
+    bool x = scale < abs(localPos.x);
+    bool y = scale < abs(localPos.y);
+    bool z = scale < abs(localPos.z);
+    return x && y || y && z || x && z;
+}
+bool DrawSphere(float3 localPos, float3 rd, float scale)
+{
+    return length(cross(localPos, rd)) <= 0.2 * scale;
+}
+int GetVoxelIdx(float3 voxelPos, float3 currentPos)
+{
+    int idx = 0;
+    if (voxelPos.x <= currentPos.x) idx |= 4;
+    if (voxelPos.y <= currentPos.y) idx |= 2;
+    if (voxelPos.z <= currentPos.z) idx |= 1;
+
+    //idx -= (int)clamp(voxelPos.x - currentPos.x, 0, 1) * 4;
+    //idx -= (int)clamp(voxelPos.y - currentPos.y, 0, 1) * 2;
+    //idx -= (int)clamp(voxelPos.z - currentPos.z, 0, 1);
+    return idx;
+}
+//clear
+float3 GetChildPos(int idx, float3 parentPos, float scale)
+{
+    return childDirection[idx] * scale * 0.25 + parentPos;
+}
+float4 VoxelTrav(int3 id, float3 ro, float3 rd)
+{
+    float4 result = float4(0, 0, 0, 1);
+    int scale = mapSize;
+    int maxLevel = log2(mapSize);
+    
+    int S_levelIdx[10];//부모 노드의 데이터 상의 인덱스
+    int S_voxelIdx[10];//레벨마다 순회중인 자식 공간 저장
+    float3 S_target[10];//레벨마다 target 저장
+    float3 S_voxelPos[10];
+
+    float3 absRd = abs(rd);
+    float3 S_delta[] = { 1 / absRd, 2 / absRd, 4 / absRd,8 / absRd, 16 / absRd, 32 / absRd, 64 / absRd, 128 / absRd, 256 / absRd, 512 / absRd };
+
+    int3 direction = sign(rd);
+    float3 nextDirection;
+    float3 currentPos = ro;
+    int level = maxLevel - 1;
+
+    float3 voxelPos = scale * 0.5;//octree[0].position;
+    int voxelIdx = GetVoxelIdx(voxelPos, currentPos);
+    int levelIdx = 0;
+
+    int vLevel = voxelLevel;
+    //int idx = 0;
+    //if (voxelPos.x <= currentPos.x) idx |= 4;
+    //if (voxelPos.y <= currentPos.y) idx |= 2;
+    //if (voxelPos.z <= currentPos.z) idx |= 1;
+
+    float3 ta = ((scale * 0.25 * direction + GetChildPos(voxelIdx, voxelPos, scale) - ro) / rd);
+    // 중앙점 기준 rd 방향으로 더 움직일 때 만날 수 있는 축마다의 표면까지 거리를 rd로 나눔.
+    uint subNode;
+    uint i = 0;
+
+    bool reflected = false;
+    uint dest = 0;
+    float3 incidence;
+
+    while (i++ < MAX_STEPS)
+    {
+
+        subNode = octree[levelIdx].subNodes[voxelIdx]; //voxelIdx가 항상 갱신되므로 매번 subNode를 구함.
+        // 선택된 공간에 데이터가 있을 경우
+        if (subNode != 0)
+        {
+            float dist = length(currentPos - _Position);
+
+            //vLevel = voxelLevel + (length(voxelPos - ro) * 0.005);
+            // 마지막 레벨일 경우.
+            if (level <= vLevel)
+            {
+                //얘는 가장 상위 레벨이기 때문에 아래의 while에 의해 level 인덱스 영향을 받지 않음.
+                //idx는 바뀜.
+               
+                //if (length(octree[subNode].color) > 0.5)
+                {
+                    float3 childPos = GetChildPos(voxelIdx, voxelPos, scale);
+                    //통과하는 애 있음
+                    if (!circleShape || DrawSphere(currentPos - childPos, rd, scale))
+                    {
+                        //통과하는 애 없음.
+                        if (!(gridEnabled && DrawGrid2(currentPos - childPos, scale * 0.5, dist, 0.003)) && !reflected)
+                            //if(gridEnabled && DrawGrid(ro, currentPos, GetChildPos(voxelIdx[level], voxelPos, scale), scale, 0.1))
+                        {
+                            result = float4(octree[subNode].color * (1 - dist / mapSize), 1) - result;
+                            //result = float4(octree[subNode].color, 1);
+                        }
+
+                        //통과하는 애 없음
+                        if (lightEnabled)
+                        {
+                            if (reflected)
+                            {
+                                if (subNode == dest) // 장애물 없이 잘 만난 경우.
+                                {
+                                    result += result * 4 * length(incidence * rd) * float4(1.2, 1.2, 1, 1);
+                                }
+                                return result;
+                            }
+                            else
+                            {
+                                reflected = true;
+                                float3 lightDirection = normalize(currentPos - lightPos);
+                                //result_origin = result;
+                                result *= 0.2;// *float4(1.3, 1.3, 1, 1);
+                                if (dot(lightDirection, nextDirection) <= 0) // 각이 안나올 경우
+                                {
+                                    return result;
+                                }
+                                dest = subNode; //  충돌지점에서 시작하는게 아닌 광원에서 출발해서 충돌한 애가 같지 않으면 그림자 처리.
+                                incidence = nextDirection / rd; // 충돌면.
+                                rd = lightDirection;
+
+                                float3 absRd2 = abs(rd);
+                                for (int i = 0; i < 10; i++)
+                                {
+                                    S_delta[i] = S_delta[i] * absRd / absRd2;
+                                }
+
+                                scale = mapSize;
+                                direction = sign(rd);
+
+                                //currentPos += rd * 0.1;
+                                ro = currentPos = lightPos;
+                                level = maxLevel - 1;
+                                voxelPos = scale * 0.5;
+                                voxelIdx = GetVoxelIdx(voxelPos, currentPos);
+                                levelIdx = 0;
+                                ta = ((scale * 0.25 * direction + GetChildPos(voxelIdx, voxelPos, scale) - ro) / rd);
+                                continue;
+                            }
+                        }
+                        else return result;
+                    }
+                }
+            }
+            
+            // 마지막 레벨이 아니면 다음 레벨로 이동
+            else
+            {
+                // voxel 크기가 반으로 줄음. 이동 거리가 줄어듦.
+
+                S_voxelIdx[level] = voxelIdx;
+                S_voxelPos[level] = voxelPos;//octree[subNode].position;
+                S_levelIdx[level] = levelIdx;
+                S_target[level] = ta; // 이동거리 정보 저장
+                --level;
+
+                voxelPos = GetChildPos(voxelIdx, voxelPos, scale);
+                scale = scales[level];
+                levelIdx = subNode;
+                voxelIdx = GetVoxelIdx(voxelPos, currentPos); //0;
+
+                //idx를 이용해서 target 초기화.
+                ta = ((scale * 0.25 * direction + GetChildPos(voxelIdx, voxelPos, scale) - ro) / rd);
+                
+                if (gridEnabled && !reflected)
+                {
+                    result.yz += 0.01;
+                    if(DrawGrid2(currentPos - voxelPos, scale, dist, 0.003))
+                    {
+                        result.xy += 0.05;
+                    }
+                }
+                continue;
+            }
+        }
+        //선택된 공간에 아무 데이터가 없을 경우 다음 칸으로 이동(voxel trav 알고리즘 사용)
+        //더이상 진행이 불가하면 이전 레벨로 이동.
+        //더이상 돌아갈 레벨이 없으면 범위를 벗어난 것.
+        //idx값으로 진행 가능 여부 check
+        nextDirection = 0;
+        if (ta.x < ta.y)
+        {
+            if (ta.x < ta.z)
+            {
+                nextDirection.x = rd.x;
+                currentPos = ro + rd * ta.x;
+                if (childDirection[voxelIdx].x * direction.x >= 0) //인덱스의 비트가 켜져 있고 direction이 양수거나 비트 꺼져있고 음수이면 진행 못함.
+                {
+                    do
+                    {
+                        if (++level >= maxLevel) return result;
+                        voxelIdx = S_voxelIdx[level];
+                    } while (childDirection[voxelIdx].x * direction.x >= 0);
+
+                    voxelPos = S_voxelPos[level];
+                    levelIdx = S_levelIdx[level];
+                    ta = S_target[level];//여기서 ta를 갱신해야 하는 이유는 나머지 축에 대해 한번도 이동하지 않았을 경우 초기값이기 때문. 초기값은 레벨마다 다름. 
+                }
+                ta.x += S_delta[level].x;
+                voxelIdx ^= 4;
+            }
+            else
+            {
+                nextDirection.z = rd.z;
+                currentPos = ro + rd * ta.z;
+                if (childDirection[voxelIdx].z * direction.z >= 0)
+                {
+                    do
+                    {
+                        if (++level >= maxLevel) return result;
+                        voxelIdx = S_voxelIdx[level];
+                    } while (childDirection[voxelIdx].z * direction.z >= 0);
+                    voxelPos = S_voxelPos[level];
+                    levelIdx = S_levelIdx[level];
+                    ta = S_target[level];
+                }
+                ta.z += S_delta[level].z;
+                voxelIdx ^= 1;
+            }
+        }
+        else
+        {
+            if (ta.y < ta.z)
+            {
+                nextDirection.y = rd.y;
+                currentPos = ro + rd * ta.y;
+                if (childDirection[voxelIdx].y * direction.y >= 0)
+                {
+                    do
+                    {
+                        if (++level >= maxLevel) return result;
+                        voxelIdx = S_voxelIdx[level];
+                    } while (childDirection[voxelIdx].y * direction.y >= 0);
+                    
+                    voxelPos = S_voxelPos[level];
+                    levelIdx = S_levelIdx[level];
+                    ta = S_target[level];
+                }
+                ta.y += S_delta[level].y;
+                voxelIdx ^= 2;
+            }
+            else
+            {
+                nextDirection.z = rd.z;
+                currentPos = ro + rd * ta.z;
+                if (childDirection[voxelIdx].z * direction.z >= 0)
+                {
+                    do
+                    {
+                        if (++level >= maxLevel) return result;
+                        voxelIdx = S_voxelIdx[level];
+                    } while (childDirection[voxelIdx].z * direction.z >= 0);
+                   
+                    voxelPos = S_voxelPos[level];
+                    levelIdx = S_levelIdx[level];
+                    ta = S_target[level];
+                }
+                ta.z += S_delta[level].z;
+                voxelIdx ^= 1;
+            }
+        }
+        scale = scales[level];
+        //target 갱신 후 여기서 idx값 찾고 subNode값 찾아야 함.
+        //target 갱신 과정에서 idx 구할 수 있는지 -> 위에서 진행 가능 여부를 체크했음.
+        //clear
+    }
+    return result;
+}
+float3 rot(float3 p, float3 a)
+{
+    float sx = sin(a.x);
+    float cx = cos(a.x);
+
+    float sy = sin(a.y);
+    float cy = cos(a.y);
+
+    p = float3(p.x, p.y * cx - p.z * sx, p.y * sx + p.z * cx);
+    p = float3(p.x * cy - p.z * sy, p.y, p.x * sy + p.z * cy);
+
+    return p;
+}
+[numthreads(8, 8, 1)]
+void Kernel1(int3 id : SV_DispatchThreadID)
+{
+    float2 uv = (id.xy / float2(ResolutionX, ResolutionY)) - 0.5;
+    float3 ro = _Position;
+    float3 rd = rot(normalize(float3(uv.x * ResolutionX / ResolutionY, uv.y, 0.86)), _Rotation);
+    float4 result = VoxelTrav(id, ro, rd);
+    result.w = 1;
+    Result[id.xy] = result;
+}
+
+//단일 변수 사용 vs 인덱싱 된 변수 사용 성능 비교 
+//https://stackoverflow.com/questions/21100228/c-sharp-performance-using-array-index

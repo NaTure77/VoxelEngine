@@ -1,0 +1,263 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel Kernel1
+//#pragma kernel Kernel2
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> Result;
+float MAX_STEPS = 400;
+sampler2D _MainTex;
+float3 _Position;
+float3 _Rotation;
+float3 mapSize;
+RWStructuredBuffer<float4> _Map;
+RWStructuredBuffer<int> centerPos;
+int centerPos_bef = -1;
+//RWTexture2D<float4> idxData;
+int ResolutionX;
+int ResolutionY;
+int screenCenterX;
+int screenCenterY;
+
+bool deleteBlock;
+bool addBlock;
+bool lightEnabled;
+bool gridEnabled;
+
+float3 lightPos;
+
+float3 Rem(float3 b)
+{
+    b.x = fmod(b.x, mapSize.x);
+    b.y = fmod(b.y, mapSize.y);
+    b.z = fmod(b.z, mapSize.z);
+    if (b.x < 0) b.x += mapSize.x;
+    if (b.y < 0) b.y += mapSize.y;
+    if (b.z < 0) b.z += mapSize.z;
+    return b;
+}
+int PosToIdx(float x, float y, float z)
+{
+    x = fmod(x, mapSize.x);
+    y = fmod(y, mapSize.y);
+    z = fmod(z, mapSize.z);
+    if (x < 0) x += mapSize.x;
+    if (y < 0) y += mapSize.y;
+    if (z < 0) z += mapSize.z;
+    return z * mapSize.x * mapSize.y + y * mapSize.x + x;
+}
+int IDToIdx(int x, int y)
+{
+    return x + y * ResolutionX;
+}
+void VoxelTrav(int3 id, float3 ro, float3 rd)
+{
+    int aB[3] = { floor(ro.x), floor(ro.y), floor(ro.z) }; // 블록 인덱스.
+
+    int3 d = sign(rd); //진행방향
+    float aD[3] = { d.x,d.y,d.z };
+
+    float3 val = 1 / abs(rd); //가중치. 요소의 값이 작을수록 더해지는 값이 더 커짐.
+    float aV[3] = { val.x, val.y, val.z };
+
+    float3 target = float3((0.5 * (d + 1) - float3(ro.x - aB[0], ro.y - aB[1], ro.z - aB[2])) / rd); //초기 더해진 가중치 계산
+    float aT[3] = { target.x,target.y,target.z };
+
+    int axisIdx = 0; // 0 == x, 1 == y, 2 == z
+    int idx = 0;
+    bool finished = false;
+    //float4 fogEffect = float4(0.2, 0.5, 0.3,1);
+    //Result[id.xy] = 
+    float4 result = float4(0, 0, 0, 1); // 결괏값 초기화
+    float dist = 0;
+    //for (int i = 0; i < MAX_STEPS; i++)
+    
+
+    while(dist < MAX_STEPS)
+    {
+        dist = sqrt(pow(aT[0] * rd.x, 2) + pow(aT[1] * rd.y, 2) + pow(aT[2] * rd.z, 2));
+        idx = PosToIdx(aB[0], aB[1], aB[2]);
+        if(_Map[idx].w != 0)
+        {
+            finished = true;
+            float ratio = dist / MAX_STEPS;//clamp(i * 0.002,0,1);
+            result += _Map[idx] * (1 - ratio); //+ fogEffect * ratio;
+            if (_Map[idx].w == 0.1) //거울
+            {
+                aB[axisIdx] -= aD[axisIdx]; // 뒤로 후퇴
+               // aT[axisIdx] -= aV[axisIdx];
+                aD[axisIdx] *= -1; // 진행방향 반전
+                
+            }
+            else if(_Map[idx].w == 1)
+            {
+                if (id.x == screenCenterX && id.y == screenCenterY) 
+                {
+                    result = float4(1, 1, 1, 1);
+                    centerPos[0] = idx;
+                    if(deleteBlock) _Map[idx].w = 0;
+                    else if (addBlock)
+                    {
+                        float4 bef = _Map[idx];
+                        aB[axisIdx] -= aD[axisIdx];
+                        idx = PosToIdx(aB[0], aB[1], aB[2]);
+                        _Map[idx] = bef;
+                    }
+                    break;
+                }
+                if (idx == centerPos_bef)
+                {
+                    result = float4(1, 1, 1, 1);
+                    break;
+                }
+                float nextDimValue = aT[axisIdx] - aV[axisIdx];
+                //aT[axisIdx] -= aV[axisIdx];
+                float3 localPos = float3((0.5 * (aD[0] + 1) - (aT[0] - nextDimValue) * rd.x),
+                                         (0.5 * (aD[1] + 1) - (aT[1] - nextDimValue) * rd.y),
+                                         (0.5 * (aD[2] + 1) - (aT[2] - nextDimValue) * rd.z));
+
+                //그리드 그리기
+                if (gridEnabled)
+                {
+                    /*bool x = abs(localPos.x - 0.5) > 0.4;
+                    bool y = abs(localPos.y - 0.5) > 0.4;
+                    bool z = abs(localPos.z - 0.5) > 0.4;
+                    if ((x && y || y && z || x && z))
+                    {
+                        float4 r = 1 - Result[id.xy];
+                        r.w = 1;
+                        Result[id.xy] = r;
+                    }*/
+                    
+                    if (length(cross(0.5 - localPos, rd)) > 0.3)
+                    {
+                        result = float4(0, 0, 0, 1);
+                       // aT[axisIdx] += aV[axisIdx];
+                        finished = false;
+                    }
+                    //else  Result[id.xy] = 1;
+                }
+                //광원과의 접촉 여부 검사
+                if (lightEnabled && finished)
+                {
+                    aB[axisIdx] -= aD[axisIdx];
+
+
+                    ro.x = aB[0] + localPos.x;
+                    ro.y = aB[1] + localPos.y;
+                    ro.z = aB[2] + localPos.z;
+                    rd = lightPos - ro;
+                    rd = normalize(rd);
+                    
+
+                    float intensity = 0;
+                    if (axisIdx == 0) intensity = abs(rd.x);
+                    if (axisIdx == 1) intensity = abs(rd.y);
+                    if (axisIdx == 2) intensity = abs(rd.z);
+
+                   // result *= intensity * 2;
+
+                   
+                    float distance = clamp(length(lightPos - ro), 0, 500);
+                    d = sign(rd);
+                    aD[0] = d.x;
+                    aD[1] = d.y;
+                    aD[2] = d.z;
+
+                    val = 1 / abs(rd);
+                    aV[0] = val.x;
+                    aV[1] = val.y;
+                    aV[2] = val.z;
+
+                    target = float3((0.5 * (d + 1) - localPos) / rd);
+                    aT[0] = target.x;
+                    aT[1] = target.y;
+                    aT[2] = target.z;
+                    dist = 0;
+
+                    //while (dist < MAX_STEPS)
+                    //float4 r = Result[id.xy];
+                    
+                    
+                    for (int j = 0; j < MAX_STEPS; j++)
+                    {
+                        dist = sqrt(pow(aT[0] * rd.x, 2) + pow(aT[1] * rd.y, 2) + pow(aT[2] * rd.z, 2));
+                        //dist = sqrt(pow(aB[0] - ro.x, 2) + pow(aB[1] - ro.y, 2) + pow(aB[2] - ro.z, 2));
+                        idx = PosToIdx(aB[0], aB[1], aB[2]);
+
+                        //r *= 0.99;
+                        if (distance < dist)
+                        {
+                            //Result[id.xy] = r;
+                            break;
+                        }
+
+                        //광원 경로 중 장애물 있을 경우.
+                        if (_Map[idx].w != 0)
+                        {
+                            result *= 0.2;
+                            //if (_Map[idx].w == 0.1) //거울
+                            //{
+                            //    aD[axisIdx] *= -1; // 진행방향 반전
+                            //    aB[axisIdx] += aD[axisIdx]; // 뒤로 후퇴
+                           // }
+                            //else
+                            break;
+                        }
+                        axisIdx = 0;
+                        if (aT[1] < aT[axisIdx]) axisIdx = 1;
+                        if (aT[2] < aT[axisIdx]) axisIdx = 2;
+                        aT[axisIdx] += aV[axisIdx];
+                        aB[axisIdx] += aD[axisIdx];
+                    }
+                    break;
+                }
+                if(finished) break;
+            }
+        }
+        /*else if (aB[0] == lightPos.x && aB[1] == lightPos.y && aB[2] == lightPos.z)
+        {
+            Result[id.xy] = 1;
+        }*/
+        axisIdx = 0;
+        if (aT[1] < aT[axisIdx]) axisIdx = 1;
+        if (aT[2] < aT[axisIdx]) axisIdx = 2;
+        aT[axisIdx] += aV[axisIdx];
+        aB[axisIdx] += aD[axisIdx];
+    }
+    result.w = 1;
+    Result[id.xy] = result;
+}
+float3 rot(float3 p, float3 a)
+{
+    float sx = sin(a.x);
+    float cx = cos(a.x);
+
+    float sy = sin(a.y);
+    float cy = cos(a.y);
+
+    p = float3(p.x, p.y * cx - p.z * sx, p.y * sx + p.z * cx);
+    p = float3(p.x * cy - p.z * sy, p.y, p.x * sy + p.z * cy);
+
+    return p;
+}
+[numthreads(8,8,1)]
+void Kernel1 (int3 id : SV_DispatchThreadID)
+{
+    float2 uv = (id.xy / float2(ResolutionX, ResolutionY)) - 0.5;
+    float3 ro = _Position;
+    float3 rd = rot(normalize(float3(uv.x * ResolutionX / ResolutionY, uv.y, 0.86)), _Rotation);
+    VoxelTrav(id, ro, rd);
+
+}
+
+/*[numthreads(8,8,1)]
+void Kernel2 (int3 id : SV_DispatchThreadID)
+{
+    bool x = idxData[id.xy].x > 0.45;
+    bool y = idxData[id.xy].y > 0.45;
+    bool z = idxData[id.xy].z > 0.45;
+    if( x && y || y && z || x && z) Result[id.xy] = float4(1,1,1,1);
+
+   // else Result[id.xy] = float4(0,0,0,0);
+}*/
