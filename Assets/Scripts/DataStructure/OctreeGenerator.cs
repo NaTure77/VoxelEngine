@@ -43,6 +43,8 @@ public static class OctreeGenerator
     {
         Vector3[] vertices = mesh.vertices;
         Vector2[] uvs = mesh.uv;
+
+        //int[] triangles = mesh.triangles;
         Vector3 minPoint = Vector3.one * float.MaxValue;
         Vector3 maxPoint = Vector3.one * float.MinValue;
         for (int i = 0; i < vertices.Length; i++)
@@ -58,7 +60,7 @@ public static class OctreeGenerator
         Vector3 size = maxPoint - minPoint;
         float longestAxisSize = Mathf.Max(size.x, size.y, size.z);
 
-        float density = scale / longestAxisSize * 0.6f;
+        float density = scale / longestAxisSize; //* 0.6f;
         Vector3 coord = ((Vector3.one * scale) / density - (maxPoint + minPoint)) / 2;
         
         Octree octree = new Octree(Vector3Int.one * scale / 2, scale);
@@ -79,6 +81,15 @@ public static class OctreeGenerator
                 octree.Push(v, texture.GetPixel(x, y));
             }
         }
+
+       /* for(int i = 0; i < triangles.Length; i+= 3)
+        {
+            Vector3 a = vertices[i];
+            Vector3 b = vertices[i + 1];
+            Vector3 c = vertices[i + 2];
+        }*/
+
+
         octree.SetColorRecursive();
         return octree;
     }

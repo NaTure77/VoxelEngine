@@ -36,9 +36,9 @@ public class @InputManager : IInputActionCollection, IDisposable
                 },
                 {
                     ""name"": ""Fire"",
-                    ""type"": ""PassThrough"",
+                    ""type"": ""Button"",
                     ""id"": ""b9c7a61e-ca8c-4b07-836d-81d0af6f7f5d"",
-                    ""expectedControlType"": ""Touch"",
+                    ""expectedControlType"": ""Button"",
                     ""processors"": """",
                     ""interactions"": """"
                 },
@@ -110,6 +110,14 @@ public class @InputManager : IInputActionCollection, IDisposable
                     ""name"": ""CircleShape"",
                     ""type"": ""Button"",
                     ""id"": ""9a37101c-3043-4123-861f-56b9e42a0a95"",
+                    ""expectedControlType"": ""Button"",
+                    ""processors"": """",
+                    ""interactions"": """"
+                },
+                {
+                    ""name"": ""Toggle"",
+                    ""type"": ""Button"",
+                    ""id"": ""32c5eab9-f9d6-4627-b7c5-9e6020142d86"",
                     ""expectedControlType"": ""Button"",
                     ""processors"": """",
                     ""interactions"": """"
@@ -619,6 +627,17 @@ public class @InputManager : IInputActionCollection, IDisposable
                     ""processors"": """",
                     ""groups"": ""Keyboard&Mouse"",
                     ""action"": ""CircleShape"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""94ff27f7-c810-4653-9b41-a99621871a5b"",
+                    ""path"": ""<Keyboard>/k"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": ""Keyboard&Mouse"",
+                    ""action"": ""Toggle"",
                     ""isComposite"": false,
                     ""isPartOfComposite"": false
                 }
@@ -1208,6 +1227,7 @@ public class @InputManager : IInputActionCollection, IDisposable
         m_Player_VoxelLevel = m_Player.FindAction("VoxelLevel", throwIfNotFound: true);
         m_Player_LightMove = m_Player.FindAction("LightMove", throwIfNotFound: true);
         m_Player_CircleShape = m_Player.FindAction("CircleShape", throwIfNotFound: true);
+        m_Player_Toggle = m_Player.FindAction("Toggle", throwIfNotFound: true);
         // UI
         m_UI = asset.FindActionMap("UI", throwIfNotFound: true);
         m_UI_Navigate = m_UI.FindAction("Navigate", throwIfNotFound: true);
@@ -1281,6 +1301,7 @@ public class @InputManager : IInputActionCollection, IDisposable
     private readonly InputAction m_Player_VoxelLevel;
     private readonly InputAction m_Player_LightMove;
     private readonly InputAction m_Player_CircleShape;
+    private readonly InputAction m_Player_Toggle;
     public struct PlayerActions
     {
         private @InputManager m_Wrapper;
@@ -1297,6 +1318,7 @@ public class @InputManager : IInputActionCollection, IDisposable
         public InputAction @VoxelLevel => m_Wrapper.m_Player_VoxelLevel;
         public InputAction @LightMove => m_Wrapper.m_Player_LightMove;
         public InputAction @CircleShape => m_Wrapper.m_Player_CircleShape;
+        public InputAction @Toggle => m_Wrapper.m_Player_Toggle;
         public InputActionMap Get() { return m_Wrapper.m_Player; }
         public void Enable() { Get().Enable(); }
         public void Disable() { Get().Disable(); }
@@ -1342,6 +1364,9 @@ public class @InputManager : IInputActionCollection, IDisposable
                 @CircleShape.started -= m_Wrapper.m_PlayerActionsCallbackInterface.OnCircleShape;
                 @CircleShape.performed -= m_Wrapper.m_PlayerActionsCallbackInterface.OnCircleShape;
                 @CircleShape.canceled -= m_Wrapper.m_PlayerActionsCallbackInterface.OnCircleShape;
+                @Toggle.started -= m_Wrapper.m_PlayerActionsCallbackInterface.OnToggle;
+                @Toggle.performed -= m_Wrapper.m_PlayerActionsCallbackInterface.OnToggle;
+                @Toggle.canceled -= m_Wrapper.m_PlayerActionsCallbackInterface.OnToggle;
             }
             m_Wrapper.m_PlayerActionsCallbackInterface = instance;
             if (instance != null)
@@ -1382,6 +1407,9 @@ public class @InputManager : IInputActionCollection, IDisposable
                 @CircleShape.started += instance.OnCircleShape;
                 @CircleShape.performed += instance.OnCircleShape;
                 @CircleShape.canceled += instance.OnCircleShape;
+                @Toggle.started += instance.OnToggle;
+                @Toggle.performed += instance.OnToggle;
+                @Toggle.canceled += instance.OnToggle;
             }
         }
     }
@@ -1550,6 +1578,7 @@ public class @InputManager : IInputActionCollection, IDisposable
         void OnVoxelLevel(InputAction.CallbackContext context);
         void OnLightMove(InputAction.CallbackContext context);
         void OnCircleShape(InputAction.CallbackContext context);
+        void OnToggle(InputAction.CallbackContext context);
     }
     public interface IUIActions
     {

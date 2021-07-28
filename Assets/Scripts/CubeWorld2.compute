@@ -21,14 +21,18 @@ RWTexture2D<float4> Result;
 float3 _Position;
 float3 _Rotation;
 float3 lightColor;
-int mapSize;
+int mapSize = 1024;
 int voxelLevel = 0;
+RWStructuredBuffer<int> pullingBuffer;
 RWStructuredBuffer<DataNode> octree;
 RWBuffer<int> scales;//2, 4, 8, 16, 32, 64, 128, 256, 512, 1024 
 RWStructuredBuffer<float3> childDirection;
 
 int ResolutionX;
 int ResolutionY;
+
+bool addBlock = false;
+bool delBlock = false;
 
 bool DrawGrid2(float3 localPos,  float scale, float dist, float thick)
 {
@@ -102,12 +106,15 @@ float4 VoxelTrav(int3 id, float3 ro, float3 rd)
     {
 
         subNode = octree[levelIdx].subNodes[voxelIdx]; //voxelIdx가 항상 갱신되므로 매번 subNode를 구함.
+
+       
         // 선택된 공간에 데이터가 있을 경우
         if (subNode != 0)
         {
             float dist = length(currentPos - _Position);
-
-            //vLevel = voxelLevel + (length(voxelPos - ro) * 0.005);
+ 
+            //vLevel = voxelLevel + max(0, min(length(voxelPos - _Position) / 300, 4)); //LOD 구현
+            //vLevel = voxelLevel + (int)max(0, min(i * 1.0 / MAX_STEPS * 10, 4)); //LOD 구현
             // 마지막 레벨일 경우.
             if (level <= vLevel)
             {
@@ -124,16 +131,95 @@ float4 VoxelTrav(int3 id, float3 ro, float3 rd)
                         if (!(gridEnabled && DrawGrid2(currentPos - childPos, scale * 0.5, dist, 0.003)) && !reflected)
                             //if(gridEnabled && DrawGrid(ro, currentPos, GetChildPos(voxelIdx[level], voxelPos, scale), scale, 0.1))
                         {
-                            result = float4(octree[subNode].color * (1 - dist / mapSize), 1) - result;
+                            if(delBlock && id.x == ResolutionX * 0.5 && id.y == ResolutionY * 0.5)
+                            {
+                               
+
+                                int lvIdx = levelIdx;
+                                int vxIdx = 0;
+
+                                //자기 자신이 포함하고 있는 공간 제거
+                                if(level > 0)
+                                {
+                                    int stack_lv[10];
+                                    int stack_vx[10];
+                                    int checkLvl = level - 1;
+                                    int checkIdx = 0;
+                                    lvIdx = octree[lvIdx].subNodes[voxelIdx];
+                                    while(checkLvl < level)
+                                    {
+                                        if(checkLvl == 0)
+                                        {
+                                            for(int j = 0; j < 8; j++)
+                                            {
+                                                octree[lvIdx].subNodes[j] = 0;
+                                            }
+                                            
+                                            checkLvl++;
+                                            lvIdx = stack_lv[checkLvl];
+                                            vxIdx = stack_vx[checkLvl];
+                                            //octree[lvIdx].subNodes[vxIdx] 이거 풀링.
+                                            octree[lvIdx].subNodes[vxIdx] = 0;
+                                            continue;
+                                        }
+                                        for(checkIdx = vxIdx; checkIdx < 8; checkIdx++)
+                                        {
+                                            if(octree[lvIdx].subNodes[checkIdx] != 0)
+                                            {        
+                                                stack_lv[checkLvl] = lvIdx;
+                                                stack_vx[checkLvl] = checkIdx;
+                                                checkLvl--;
+                                                lvIdx = octree[lvIdx].subNodes[checkIdx];
+                                                vxIdx = 0;
+                                                continue;
+                                            }                               
+                                        }
+                                        checkLvl++;
+                                    }                              
+                                }
+                                //자기 자신 제거
+                                lvIdx = levelIdx;
+                                vxIdx = voxelIdx;
+
+                                //octree[lvIdx].subNodes[vxIdx] 이거 풀링.
+                                octree[lvIdx].subNodes[vxIdx] = 0;
+
+                                //자기 자신을 포함하는 공간이 완전 비었을 경우 제거
+                                for(int i = level + 1; i < maxLevel; i++)
+                                {
+                                    int blockCnt = 0;
+                                    for(int j = 0; j < 8; j++)
+                                    {
+                                        if(octree[lvIdx].subNodes[j] != 0)
+                                            blockCnt++;
+                                    }
+                                    if(blockCnt == 0)
+                                    {
+                                        //octree[S_levelIdx[i]].subNodes[S_voxelIdx[i]] 이거 풀링.
+                                       octree[S_levelIdx[i]].subNodes[S_voxelIdx[i]] = 0;
+                                    }
+                                    lvIdx = S_levelIdx[i];
+                                    vxIdx = S_voxelIdx[i];
+                                }
+                            }
+                            if(addBlock && id.x == ResolutionX * 0.5 && id.y == ResolutionY * 0.5)
+                            {
+                                //더할 블록 위치 구하고
+                                //해당 위치를 위한 블록이 octree에 추가될 수있는지 알아보고
+                                //없으면 octree에 계층구조 추가
+                                //
+                            }
+                            result = float4(octree[subNode].color * (1 - dist / mapSize), 1) - result; //색상반전
                             //result = float4(octree[subNode].color, 1);
                         }
 
-                        //통과하는 애 없음
+                        //통과하는 애 없음, 그림자 기능 활성화된 경우.
                         if (lightEnabled)
                         {
+                            //한번 반사되었고 물체에 부딛힌 경우.
                             if (reflected)
                             {
-                                if (subNode == dest) // 장애물 없이 잘 만난 경우.
+                                if (subNode == dest) // 장애물 없이 잘 만난 경우. 반사지점과 충돌지점이 일치하는 경우.
                                 {
                                     result += result * 4 * length(incidence * rd) * float4(1.2, 1.2, 1, 1);
                                 }
@@ -320,6 +406,8 @@ void Kernel1(int3 id : SV_DispatchThreadID)
     float3 ro = _Position;
     float3 rd = rot(normalize(float3(uv.x * ResolutionX / ResolutionY, uv.y, 0.86)), _Rotation);
     float4 result = VoxelTrav(id, ro, rd);
+
+    //result.xyz = (result.x + result.y + result.z) / 3;
     result.w = 1;
     Result[id.xy] = result;
 }

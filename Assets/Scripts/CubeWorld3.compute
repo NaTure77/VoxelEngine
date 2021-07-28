@@ -1,0 +1,207 @@
+﻿#pragma kernel Kernel1
+
+RWTexture2D<float4> _Map;
+RWTexture2D<float4> Result;
+float MAX_STEPS = 800;
+
+float3 _Position;
+float3 _Rotation;
+float3 mapSize;
+
+RWStructuredBuffer<uint2> centerPos;
+uint2 centerPos_bef = 0;
+
+int ResolutionX;
+int ResolutionY;
+int screenCenterX;
+int screenCenterY;
+
+bool deleteBlock;
+bool addBlock;
+bool lightEnabled;
+bool gridEnabled;
+
+float3 lightPos;
+
+bool DrawGrid(float3 localPos, float dist, float thick)
+{
+    float thickness = dist * thick;
+    float theta = 0.5 - thickness;
+    localPos -= 0.5;
+    bool x = theta < abs(localPos.x);
+    bool y = theta < abs(localPos.y);
+    bool z = theta < abs(localPos.z);
+    return x && y || y && z || x && z;
+}
+
+//이전 방식
+uint2 GetIdx2D(uint idx)
+{
+    return uint2(idx / 4096, idx % 4096);
+}
+
+//새로운 방식
+uint2 GetIdx2D(uint x, uint y, uint z)
+{
+    uint cellNum_col = y / 16;
+    uint cellNum_row = y % 16;
+
+    uint x2 = x + cellNum_row * 256;
+    uint y2 = z + cellNum_col * 256;
+
+    return uint2(x2, y2);
+}
+void VoxelTrav(int3 id, float3 ro, float3 rd)
+{
+    int aB[3] = { floor(ro.x), floor(ro.y), floor(ro.z) }; // 블록 인덱스.
+
+    int3 d = sign(rd); //진행방향
+    float aD[3] = { d.x,d.y,d.z };
+
+    float3 val = 1 / abs(rd); //가중치. 요소의 값이 작을수록 더해지는 값이 더 커짐.
+    float aV[3] = { val.x, val.y, val.z };
+
+    float3 target = float3((0.5 * (d + 1) - float3(ro.x - aB[0], ro.y - aB[1], ro.z - aB[2])) / rd); //초기 더해진 가중치 계산
+    float aT[3] = { target.x,target.y,target.z };
+
+    int axisIdx = 0; // 0 == x, 1 == y, 2 == z
+    uint2 idx2D;
+   
+    float4 resultColors[4] = { float4(0.2, 0.2, 0.2, 1) , float4(1, 1, 1, 1) , float4(0,0,0,0), float4(1,1,1,1) };
+    float count = 0;
+
+    //그림자 관련 변수들
+    bool reflected = false;
+    uint2 light_dest = 0;
+    float3 light_incidence;
+    
+    while (count++ < MAX_STEPS)
+    {
+        idx2D = GetIdx2D(aB[0], aB[1], aB[2]);
+        if (_Map[idx2D].r + _Map[idx2D].g + _Map[idx2D].b > 0.3)
+            //if(length(_Map[idx2D].xyz) > 0.22)
+        {
+            //if (_Map[idx2D].w == 1)
+            {     
+                //반사 후 작업이면 블록 색 더하기 x
+                //분기문 대체.
+                resultColors[0] += (!reflected) * _Map[idx2D] * clamp(1 - count / (mapSize.x * 2), 0, 1); //* (1 - ratio); //+ fogEffect * ratio;
+                //중앙점
+                if (id.x == screenCenterX && id.y == screenCenterY)
+                {
+                    centerPos[0] = idx2D; //idx2D.x + idx2D.y * 4096;
+
+                    // _Map[idx2D] = resultColors[deleteBlock * 3];
+                    if (deleteBlock) _Map[idx2D] = resultColors[2];
+                    else if (addBlock)
+                    {
+                        float4 bef = _Map[idx2D];
+                        aB[axisIdx] -= aD[axisIdx];
+                        _Map[GetIdx2D(aB[0], aB[1], aB[2])] = bef;
+                        //aB[axisIdx] += aD[axisIdx];
+                    }
+                    break;
+                }
+                
+                //타게팅 된 블록 칠하기, 분기문 대체
+                resultColors[0] = resultColors[(!any(idx2D - centerPos_bef) * !reflected) * 3];
+
+                //충돌한 지점의 로컬 좌표 구하기. -0.5 ~ 0.5
+                float nextDimValue = aT[axisIdx] - aV[axisIdx];
+                float3 localPos = float3((0.5 * (aD[0] + 1) - (aT[0] - nextDimValue) * rd.x),
+                                         (0.5 * (aD[1] + 1) - (aT[1] - nextDimValue) * rd.y),
+                                         (0.5 * (aD[2] + 1) - (aT[2] - nextDimValue) * rd.z));
+
+                //그리드 그리기
+                //분기문 대체
+                resultColors[0] = resultColors[(DrawGrid(localPos, distance(float3(aB[0], aB[1], aB[2]) + localPos, ro), 0.003)) * gridEnabled * !reflected];
+
+                //라이트 활성화 안되고 반사도 안됨 -> 끝냄
+                //라이트 활성화 안되고 반사 됨 -> 이런 경우 없음.
+                //라이트 활성화 되고 반사 안됨 -> 루프 연장
+                //라이트 활성화 되고 반사 됨 -> 끝냄.
+                //count += (lightEnabled == reflected) * MAX_STEPS;
+                count += reflected * MAX_STEPS;
+
+
+                /**********라이트 활성화 코드 영역***********/
+                //라이트 활성화 되고 반사 된 상태면 빛 반사 더하기
+                resultColors[0] += /*lightEnabled **/ reflected * !any(idx2D - light_dest) * resultColors[0] * 4 * length(light_incidence * rd) * float4(1.5, 1.5, 1.3, 1);
+                
+                //반사 상태 반전
+                reflected = !reflected;
+
+                //라이트 활성화 되고 반사 일어나는 시점에서 결과값 밝기 낮춤
+                resultColors[0] *= (!(reflected /** lightEnabled*/) * 0.8) + 0.2;
+
+                float anD[3] = { 0,0,0 };
+                anD[axisIdx] = 1 / aV[axisIdx] * aD[axisIdx];
+
+                float3 nextDir = float3(anD[0], anD[1], anD[2]);
+                float3 lightDir = normalize(float3(aB[0], aB[1], aB[2]) + localPos - lightPos);
+
+                //분기문 대체. 반사각 안나올 경우 종료.
+                //라이트 활성화 안되있으면 어차피 종료 됨.
+                count += (dot(lightDir, nextDir) <= 0) * MAX_STEPS;
+
+                light_dest = idx2D; //idx2D.x + idx2D.y * 4096;//idx;
+                light_incidence = nextDir * val;
+
+                ro = lightPos;
+                aB[0] = floor(ro.x);
+                aB[1] = floor(ro.y);
+                aB[2] = floor(ro.z);
+
+                rd = lightDir;
+                d = sign(rd);
+                aD[0] = d.x;
+                aD[1] = d.y;
+                aD[2] = d.z;
+
+                val = 1 / abs(rd); //가중치. 요소의 값이 작을수록 더해지는 값이 더 커짐.
+                aV[0] = val.x;
+                aV[1] = val.y;
+                aV[2] = val.z;
+
+                target = float3((0.5 * (d + 1) - float3(ro.x - aB[0], ro.y - aB[1], ro.z - aB[2])) / rd); //초기 더해진 가중치 계산
+                aT[0] = target.x;
+                aT[1] = target.y;
+                aT[2] = target.z;
+                continue;
+                /**********라이트 활성화 코드 영역***********/
+            }
+            //count -= (_Map[idx2D].w == 0.1) * MAX_STEPS;
+            //거울
+            aB[axisIdx] -= aD[axisIdx] * (_Map[idx2D].w == 0.1); // 뒤로 후퇴
+            aD[axisIdx] *= -1 * (_Map[idx2D].w == 0.1);// 진행방향 반전
+        }
+        //분기문 대체
+        axisIdx = aT[1] < aT[0];
+        axisIdx = max((aT[2] < aT[axisIdx]) * 2, axisIdx);
+        aT[axisIdx] += aV[axisIdx];
+        aB[axisIdx] += aD[axisIdx];
+        //분기문 대체
+        count += ((aB[axisIdx] >= mapSize.x) + (aB[axisIdx] < 0)) * MAX_STEPS;
+    }
+    resultColors[0].w = 1;
+    Result[id.xy] = resultColors[0];
+}
+float3 rot(float3 p, float3 a)
+{
+    float sx, cx, sy, cy;
+    sincos(a.x, sx, cx);
+    sincos(a.y, sy, cy);
+
+    p = float3(p.x, p.y * cx - p.z * sx, p.y * sx + p.z * cx);
+    p = float3(p.x * cy - p.z * sy, p.y, p.x * sy + p.z * cy);
+
+    return p;
+}
+[numthreads(8, 8, 1)]
+void Kernel1(int3 id : SV_DispatchThreadID)
+{
+    float2 uv = (id.xy / float2(ResolutionX, ResolutionY)) - 0.5;
+    float3 ro = _Position;
+    float3 rd = rot(normalize(float3(uv.x * ResolutionX / ResolutionY, uv.y, 0.86)), _Rotation);
+    VoxelTrav(id, ro, rd);
+}

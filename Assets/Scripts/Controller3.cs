@@ -52,6 +52,9 @@ public class Controller3 : MonoBehaviour
         public const string FLAG_GRID = "gridEnabled";
         public const string FLAG_LIGHT = "lightEnabled";
         public const string FLAG_CIRCLE = "circleShape";
+
+        public const string FLAG_ADDBLK = "addBlock";
+        public const string FLAG_DELBLK = "delBlock";
         public const string RESOLUTION_X = "ResolutionX";
         public const string RESOLUTION_Y = "ResolutionY";
         public const string VOXELLVL = "voxelLevel";
@@ -118,13 +121,30 @@ public class Controller3 : MonoBehaviour
             circleShape = !circleShape;
             computeShader.SetBool(CSPARAM.FLAG_CIRCLE, circleShape);
         };
+        inputManager.Player.Fire.performed += val =>
+        {
+            FLAG_ADDBLK = true;
+        };
+        inputManager.Player.Mouse1.performed += val =>
+        {
+            FLAG_DELBLK = true;
+        };
         Init();
+
+        float byteSize =  0;
+
+        for(int i = 0; i< 30; i+= 3)
+        {
+            byteSize += Mathf.Pow(2,i);
+        }
+        Debug.Log(byteSize / Mathf.Pow(2,20));
     }
     void Init()
     {
         KernelID = computeShader.FindKernel(CSPARAM.KERNELID);
         computeShader.SetInt(CSPARAM.VOXELLVL, VoxelLevel);
         ShowGrid(false);
+        //ShowShadow(false);
         computeShader.SetBool(CSPARAM.FLAG_LIGHT, false);
         computeShader.SetBool(CSPARAM.FLAG_CIRCLE, false);
     }
@@ -158,6 +178,8 @@ public class Controller3 : MonoBehaviour
 
         // mapBuffer =  new ComputeBuffer(pointData.Length, sizeof(float) * 3);
         octreeBuffer = new ComputeBuffer(octree.Count, sizeof(int) * 8 + sizeof(float) * 3);
+
+        Debug.Log(octree.Count * (sizeof(int) * 8 + sizeof(float) * 3) / Mathf.Pow(2,20));
         scalesBuffer = new ComputeBuffer(10, sizeof(int));
         childPosBuffer = new ComputeBuffer(8, sizeof(float) * 3);
 
@@ -256,6 +278,10 @@ public class Controller3 : MonoBehaviour
             {
                 ImageViewer.instance.Dispatch();
             }
+
+            SetBlock();
+
+
             DispatchComputeShader();
 
             yield return null;
@@ -291,6 +317,15 @@ public class Controller3 : MonoBehaviour
         computeShader.SetBool(CSPARAM.FLAG_LIGHT, b);
     }
 
+    public bool FLAG_ADDBLK;
+    public bool FLAG_DELBLK;
+    public void SetBlock()
+    {
+        computeShader.SetBool(CSPARAM.FLAG_DELBLK,FLAG_DELBLK);
+        computeShader.SetBool(CSPARAM.FLAG_ADDBLK,FLAG_ADDBLK);
+        FLAG_ADDBLK = false;
+        FLAG_DELBLK = false;
+    }
 
     IEnumerator followLightPosCoroutine()
     {

@@ -17,7 +17,7 @@ public class OptionUI2 : MonoBehaviour
 
     private void Start()
     {
-        optionPanel.SetActive(true);
+        ActivateUI(true);
         Controller3.instance.inputManager.Player.Esc.performed += val =>
         {
             ToggleUI();
@@ -89,8 +89,8 @@ public class OptionUI2 : MonoBehaviour
         if (activate) Controller3.instance.StopLoop();
         else Controller3.instance.StartLoop();
         optionPanel.SetActive(activate);
-        //Cursor.visible = activate;
-        //Cursor.lockState = Cursor.visible ? CursorLockMode.None : CursorLockMode.Locked;
+        Cursor.visible = activate;
+        Cursor.lockState = Cursor.visible ? CursorLockMode.None : CursorLockMode.Locked;
     }
     public void ExitApplication()
     {

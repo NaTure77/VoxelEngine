@@ -3552,6 +3552,8 @@ GameObject:
   - component: {fileID: 1150948407}
   - component: {fileID: 1150948406}
   - component: {fileID: 1150948408}
+  - component: {fileID: 1150948409}
+  - component: {fileID: 1150948410}
   m_Layer: 0
   m_Name: GameObject
   m_TagString: Untagged
@@ -3601,18 +3603,21 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: adaa7b8907d72734f8f36bac0c639b26, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  computeShader: {fileID: 7200000, guid: f9b3f0fb369d83648aa170612f45c603, type: 3}
+  computeShader: {fileID: 7200000, guid: 4aab79df6b62a3f44ad628bfde831edb, type: 3}
   rawImage: {fileID: 1728888322}
   resolution: {x: 0, y: 0}
-  pos: {x: 0, y: 140, z: 0}
+  pos: {x: 0, y: 0, z: 0}
   pos_temp: {x: 0, y: 0, z: 0}
   moveDirection_touch: {x: 0, y: 0, z: 0}
   rot: {x: 0, y: 0, z: 0}
   rot_temp: {x: 0, y: 0, z: 0}
-  moveSpeed: 50
+  moveSpeed: 150
   rot_sensitivity: {x: 0.2, y: 0.2}
   touchPad: {fileID: 1780647637}
   controllerPad: {fileID: 802010244}
+  renderTex: {fileID: 8400000, guid: fa22a15b2e090ce45bbd8d4342752362, type: 2}
+  videoMode: 1
+  URLVideo: 0
   qText: {fileID: 779357551}
   dText: {fileID: 92690942}
 --- !u!114 &1150948408
@@ -3627,6 +3632,55 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d94c709284ac35d4a9c8d583be48743f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!328 &1150948409
+VideoPlayer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1150948404}
+  m_Enabled: 1
+  m_VideoClip: {fileID: 32900000, guid: 18356762f347dac4f9ccb15fe260978e, type: 3}
+  m_TargetCameraAlpha: 1
+  m_TargetCamera3DLayout: 0
+  m_TargetCamera: {fileID: 0}
+  m_TargetTexture: {fileID: 0}
+  m_TimeReference: 0
+  m_TargetMaterialRenderer: {fileID: 0}
+  m_TargetMaterialProperty: _MainTex
+  m_RenderMode: 2
+  m_AspectRatio: 5
+  m_DataSource: 1
+  m_PlaybackSpeed: 1
+  m_AudioOutputMode: 0
+  m_TargetAudioSources:
+  - {fileID: 0}
+  m_DirectAudioVolumes:
+  - 1
+  m_Url: file://C:/Users/xnaud/Desktop/Untitled15.mp4
+  m_EnabledAudioTracks: 01
+  m_DirectAudioMutes: 00
+  m_ControlledAudioTrackCount: 1
+  m_PlayOnAwake: 0
+  m_SkipOnDrop: 0
+  m_Looping: 1
+  m_WaitForFirstFrame: 0
+  m_FrameReadyEventEnabled: 0
+  m_VideoShaders: []
+--- !u!114 &1150948410
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1150948404}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f68c70f26e2e83e459f5e14959b3b34d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  videoPlayer: {fileID: 1150948409}
+  url: https://youtu.be/CCDgvged-0Q
 --- !u!1 &1155944585
 GameObject:
   m_ObjectHideFlags: 0
@@ -4724,7 +4778,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &1780647638
 RectTransform:
   m_ObjectHideFlags: 0
@@ -6517,7 +6571,7 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 7562140593250091138}
   m_HandleRect: {fileID: 7418033631680046028}
   m_Direction: 2
-  m_Value: 0.9999997
+  m_Value: 1
   m_Size: 0.8672457
   m_NumberOfSteps: 0
   m_OnValueChanged:

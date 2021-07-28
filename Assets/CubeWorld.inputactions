@@ -23,9 +23,9 @@
                 },
                 {
                     "name": "Fire",
-                    "type": "PassThrough",
+                    "type": "Button",
                     "id": "b9c7a61e-ca8c-4b07-836d-81d0af6f7f5d",
-                    "expectedControlType": "Touch",
+                    "expectedControlType": "Button",
                     "processors": "",
                     "interactions": ""
                 },
@@ -97,6 +97,14 @@
                     "name": "CircleShape",
                     "type": "Button",
                     "id": "9a37101c-3043-4123-861f-56b9e42a0a95",
+                    "expectedControlType": "Button",
+                    "processors": "",
+                    "interactions": ""
+                },
+                {
+                    "name": "Toggle",
+                    "type": "Button",
+                    "id": "32c5eab9-f9d6-4627-b7c5-9e6020142d86",
                     "expectedControlType": "Button",
                     "processors": "",
                     "interactions": ""
@@ -606,6 +614,17 @@
                     "processors": "",
                     "groups": "Keyboard&Mouse",
                     "action": "CircleShape",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "94ff27f7-c810-4653-9b41-a99621871a5b",
+                    "path": "<Keyboard>/k",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "Keyboard&Mouse",
+                    "action": "Toggle",
                     "isComposite": false,
                     "isPartOfComposite": false
                 }

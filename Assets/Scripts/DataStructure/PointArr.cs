@@ -73,14 +73,14 @@ public class VoxelArray
     }
     public int PosToIdx(Vector3 p)
     {
-        return (int)(p.z * scale * scale + p.y * scale + p.x);
+        return (int)((int)p.z * scale * scale + (int)p.y * scale + (int)p.x);
     }
     public Vector3 IdxToPos(int idx)
     {
         Vector3 result = new Vector3();
-        result.z = idx / (scale * scale) + 0.5f;
-        result.y = (idx % (scale * scale)) / scale + 0.5f;
-        result.x = idx % scale + 0.5f;
+        result.z = idx / (scale * scale);// + 0.5f;
+        result.y = (idx % (scale * scale)) / scale;// + 0.5f;
+        result.x = idx % scale;// + 0.5f;
         return result;
     }
 }

@@ -3,6 +3,9 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.InputSystem;
 using System.Linq;
+using System.IO;
+using System.Collections.Generic;
+using UnityEngine.Video;
 
 namespace CubeWorld
 {
@@ -28,7 +31,7 @@ namespace CubeWorld
         ComputeBuffer centerPos;
         RenderTexture renderTexture;
 
-
+        int mapSize = 256;
         bool addBlockFlag = false;
         bool delBlockFlag = false;
         private struct CSPARAM
@@ -39,6 +42,7 @@ namespace CubeWorld
             public const string POSITION = "_Position";
             public const string ROTATION = "_Rotation";
             public const string MAP = "_Map";
+            public const string MAPIMAGE = "mapImage";
             public const string CENTER = "centerPos";
 
             public const string CENTERBEF = "centerPos_bef";
@@ -65,6 +69,8 @@ namespace CubeWorld
         public static Controller2 instance;
 
         public InputManager inputManager;
+
+        bool lightMoving = false;
         private void Awake()
         {
             instance = this;
@@ -93,17 +99,62 @@ namespace CubeWorld
                 if (val.ReadValue<float>() > 0)
                     addBlockFlag = true;
             };
+            inputManager.Player.LightMove.performed += val =>
+            {
+                lightMoving = !lightMoving;
+            };
+
+            /*inputManager.Player.Toggle.performed += val =>
+            {
+                if (val.ReadValue<float>() > 0)
+                    ShowNext();
+            };*/
             Init();
         }
+        public RenderTexture renderTex;
+        VideoPlayer videoPlayer;
+        Texture2D mapImage;
 
+        public bool videoMode = true;
+        public bool URLVideo = false;
+        private void Start()
+        { 
+            renderTex = new RenderTexture(4096, 4096, 24);
+            renderTex.enableRandomWrite = true;
+            renderTex.Create();
+
+            if(videoMode) StartVideoAnimation();
+            else LoadMap();
+
+            computeShader.SetTexture(KernelID, CSPARAM.MAP, renderTex);
+            StartRendering(Vector3Int.one * mapSize);
+        }
+
+        void LoadMap()
+        {
+            mapImage = new Texture2D(4096, 4096);
+            byte[] byteArr = File.ReadAllBytes(Application.persistentDataPath + "/mapImage1.png");//"/Doom combat scene/mapImage0" + ".png");
+            mapImage.LoadImage(byteArr);
+            Graphics.Blit(mapImage, renderTex);
+        }
+
+        void StartVideoAnimation()
+        {
+            videoPlayer = GetComponent<VideoPlayer>();
+            videoPlayer.targetTexture = renderTex;
+            
+            if(URLVideo) GetComponent<VideoController>().Play();
+            else videoPlayer.Play();
+        }
         void Init()
         {
             KernelID = computeShader.FindKernel(CSPARAM.KERNELID);
-            centerPos = new ComputeBuffer(1, sizeof(int));
+            centerPos = new ComputeBuffer(1, sizeof(float) * 2);
             computeShader.SetBuffer(KernelID, CSPARAM.CENTER, centerPos);
             computeShader.SetFloat(CSPARAM.MAX_STEPS, distanceLevels[currentDLevel]);
+            computeShader.SetBool(CSPARAM.FLAG_LIGHT, false);
+            computeShader.SetBool(CSPARAM.FLAG_GRID, false);
             ShowGrid(false);
-            ShowShadow(false);
         }
 
         public void SetTexture()
@@ -132,9 +183,22 @@ namespace CubeWorld
                 mapBuffer.Release();
             }
             
-            mapBuffer =  new ComputeBuffer(mapSize.x * mapSize.y * mapSize.z, sizeof(float) * 4);
-            mapBuffer.SetData(mapData);
-            computeShader.SetBuffer(KernelID, CSPARAM.MAP, mapBuffer);
+            //mapBuffer =  new ComputeBuffer(mapSize.x * mapSize.y * mapSize.z, sizeof(float) * 4);
+            //mapBuffer.SetData(mapData);
+            //computeShader.SetBuffer(KernelID, CSPARAM.MAP, mapBuffer);
+            computeShader.SetVector(CSPARAM.MAPSIZE, (Vector3)mapSize);
+            SetTexture();
+
+            mainLoop = Loop();
+            StartCoroutine(mainLoop);
+        }
+        void StartRendering(Vector3Int mapSize)
+        {
+            if (mainLoop != null)
+            {
+                StopCoroutine(mainLoop);
+                mapBuffer.Release();
+            }
             computeShader.SetVector(CSPARAM.MAPSIZE, (Vector3)mapSize);
             SetTexture();
 
@@ -173,7 +237,9 @@ namespace CubeWorld
                 moveDirection += moveDirection_touch;
                 Move(moveDirection);
                 DispatchComputeShader();
-                
+
+                // ShowNext();
+                // ChangeMap();
                 yield return null;
             }
            
@@ -192,8 +258,8 @@ namespace CubeWorld
         }
 
 
-        int[] distanceLevels = { 50, 100, 200, 300, 400};
-        int currentDLevel = 1;
+        int[] distanceLevels = { 50, 100, 200, 300, 800};
+        int currentDLevel = 4;
         public Text dText;
         public void SetDistance(int i)
         {
@@ -207,11 +273,7 @@ namespace CubeWorld
             computeShader.SetBool(CSPARAM.FLAG_GRID, b);
         }
 
-        public void ShowShadow(bool b)
-        {
-            computeShader.SetVector(CSPARAM.LIGHTPOS, pos);
-            computeShader.SetBool(CSPARAM.FLAG_LIGHT, b);
-        }
+
 
         public void SetGamepadMode(bool b)
         {
@@ -234,10 +296,42 @@ namespace CubeWorld
         {
             computeShader.Dispatch(KernelID, Mathf.CeilToInt( 1.0f * resolution.x / CSPARAM.THREAD_NUMBER_X), Mathf.CeilToInt(1.0f * resolution.y / CSPARAM.THREAD_NUMBER_Y), 1);
             //타게팅 된 블록의 인덱스 가져오기.
-            int[] centerIdx = { 0 };
+            Vector2[] centerIdx = {Vector2.zero};
             centerPos.GetData(centerIdx);
-            computeShader.SetInt(CSPARAM.CENTERBEF,centerIdx[0]);
+            computeShader.SetVector(CSPARAM.CENTERBEF,centerIdx[0]);
         }
+
+
+        Vector3 lightPos = new Vector3();
+        IEnumerator coroutineVar;
+        public void ShowShadow(bool b)
+        {
+            if (!b)
+            {
+                StopCoroutine(coroutineVar);
+            }
+            else
+            {
+                coroutineVar = followLightPosCoroutine();
+                StartCoroutine(coroutineVar);
+            }
+            computeShader.SetBool(CSPARAM.FLAG_LIGHT, b);
+        }
+
+        IEnumerator followLightPosCoroutine()
+        {
+            while (true)
+            {
+                if (lightMoving)
+                {
+                    lightPos = Vector3.Lerp(lightPos, pos, 0.01f);
+                    computeShader.SetVector(CSPARAM.LIGHTPOS, lightPos);
+                }
+
+                yield return null;
+            }
+        }
+
         void Rotate()
         {
             rot_temp = Vector3.Lerp(rot_temp, rot,0.3f);
@@ -250,6 +344,11 @@ namespace CubeWorld
             float sin = Mathf.Sin(rot_temp.y * PI);
             float cos = Mathf.Cos(rot_temp.y * PI);
             pos += new Vector3(d.x * cos - d.z * sin, d.y, d.x * sin + d.z * cos);
+
+
+            pos.x = Mathf.Clamp(pos.x, 0, mapSize);
+            pos.y = Mathf.Clamp(pos.y, 0, mapSize);
+            pos.z = Mathf.Clamp(pos.z, 0, mapSize);
 
             pos_temp = Vector3.Lerp(pos_temp, pos, 0.1f);
             computeShader.SetVector(CSPARAM.POSITION, pos_temp);

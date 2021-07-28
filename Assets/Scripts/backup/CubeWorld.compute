@@ -1,19 +1,16 @@
-﻿// Each #kernel tells which function to compile; you can have many kernels
-#pragma kernel Kernel1
-//#pragma kernel Kernel2
+﻿#pragma kernel Kernel1
 
-// Create a RenderTexture with enableRandomWrite flag and set it
-// with cs.SetTexture
+RWTexture2D<float4> _Map;
 RWTexture2D<float4> Result;
-float MAX_STEPS = 400;
-sampler2D _MainTex;
+float MAX_STEPS = 800;
+
 float3 _Position;
 float3 _Rotation;
 float3 mapSize;
-RWStructuredBuffer<float4> _Map;
-RWStructuredBuffer<int> centerPos;
-int centerPos_bef = -1;
-//RWTexture2D<float4> idxData;
+
+RWStructuredBuffer<uint2> centerPos;
+uint2 centerPos_bef = 0;
+
 int ResolutionX;
 int ResolutionY;
 int screenCenterX;
@@ -26,29 +23,36 @@ bool gridEnabled;
 
 float3 lightPos;
 
-float3 Rem(float3 b)
+bool DrawGrid(float3 localPos, float dist, float thick)
 {
-    b.x = fmod(b.x, mapSize.x);
-    b.y = fmod(b.y, mapSize.y);
-    b.z = fmod(b.z, mapSize.z);
-    if (b.x < 0) b.x += mapSize.x;
-    if (b.y < 0) b.y += mapSize.y;
-    if (b.z < 0) b.z += mapSize.z;
-    return b;
+    float thickness = dist * thick;
+    float theta = 0.5 - thickness;
+    localPos -= 0.5;
+    bool x = theta < abs(localPos.x);
+    bool y = theta < abs(localPos.y);
+    bool z = theta < abs(localPos.z);
+    return x && y || y && z || x && z;
+
+    /*int x = step(theta, abs(localPos.x));
+    int y = step(theta, abs(localPos.y));
+    int z = step(theta, abs(localPos.z));
+    return x + y + z;*/
 }
-int PosToIdx(float x, float y, float z)
+
+uint2 GetIdx2D(uint idx)
 {
-    x = fmod(x, mapSize.x);
-    y = fmod(y, mapSize.y);
-    z = fmod(z, mapSize.z);
-    if (x < 0) x += mapSize.x;
-    if (y < 0) y += mapSize.y;
-    if (z < 0) z += mapSize.z;
-    return z * mapSize.x * mapSize.y + y * mapSize.x + x;
+    return uint2(idx / 4096, idx % 4096);
 }
-int IDToIdx(int x, int y)
+
+uint2 GetIdx2D(uint x, uint y, uint z)
 {
-    return x + y * ResolutionX;
+    uint cellNum_col = y / 16;
+    uint cellNum_row = y % 16;
+
+    uint x2 = x + cellNum_row * 256;
+    uint y2 = z + cellNum_col * 256;
+
+    return uint2(x2,y2);
 }
 void VoxelTrav(int3 id, float3 ro, float3 rd)
 {
@@ -64,177 +68,182 @@ void VoxelTrav(int3 id, float3 ro, float3 rd)
     float aT[3] = { target.x,target.y,target.z };
 
     int axisIdx = 0; // 0 == x, 1 == y, 2 == z
-    int idx = 0;
+    uint idx = 0;
+    uint2 idx2D;
     bool finished = false;
-    //float4 fogEffect = float4(0.2, 0.5, 0.3,1);
-    //Result[id.xy] = 
-    float4 result = float4(0, 0, 0, 1); // 결괏값 초기화
-    float dist = 0;
-    //for (int i = 0; i < MAX_STEPS; i++)
-    
 
-    while(dist < MAX_STEPS)
+    float4 result = float4(0, 0, 0, 1); // 결괏값 초기화
+
+    int count = 0;
+    //float dist = 0;
+
+    //그림자 관련 변수들
+    bool reflected = false;
+    uint2 light_dest = 0;
+    float3 light_incidence;
+    
+    while(count++ < MAX_STEPS)
     {
-        dist = sqrt(pow(aT[0] * rd.x, 2) + pow(aT[1] * rd.y, 2) + pow(aT[2] * rd.z, 2));
-        idx = PosToIdx(aB[0], aB[1], aB[2]);
-        if(_Map[idx].w != 0)
+        idx2D = GetIdx2D(aB[0], aB[1], aB[2]);
+        if(_Map[idx2D].r + _Map[idx2D].g + _Map[idx2D].b > 0.3)
+        //if(length(_Map[idx2D].xyz) > 0.22)
         {
-            finished = true;
-            float ratio = dist / MAX_STEPS;//clamp(i * 0.002,0,1);
-            result += _Map[idx] * (1 - ratio); //+ fogEffect * ratio;
-            if (_Map[idx].w == 0.1) //거울
+            
+            //dist = sqrt(pow(aT[0] * rd.x, 2) + pow(aT[1] * rd.y, 2) + pow(aT[2] * rd.z, 2));
+            //float ratio = dist / MAX_STEPS;//clamp(i * 0.002,0,1);
+
+            //반사 후 작업이면 블록 색 더하기 x
+            result += step(reflected, 0.5) * _Map[idx2D]; //* (1 - ratio); //+ fogEffect * ratio;
+            
+            if(_Map[idx2D].w == 1)
             {
-                aB[axisIdx] -= aD[axisIdx]; // 뒤로 후퇴
-               // aT[axisIdx] -= aV[axisIdx];
-                aD[axisIdx] *= -1; // 진행방향 반전
-                
-            }
-            else if(_Map[idx].w == 1)
-            {
+                finished = true;
+                //중앙점
                 if (id.x == screenCenterX && id.y == screenCenterY) 
                 {
                     result = float4(1, 1, 1, 1);
-                    centerPos[0] = idx;
-                    if(deleteBlock) _Map[idx].w = 0;
+                    centerPos[0] = idx2D; //idx2D.x + idx2D.y * 4096;
+                    if (deleteBlock) _Map[idx2D] = float4(0, 0, 0, 0);
                     else if (addBlock)
                     {
-                        float4 bef = _Map[idx];
+                        float4 bef = _Map[idx2D];
                         aB[axisIdx] -= aD[axisIdx];
-                        idx = PosToIdx(aB[0], aB[1], aB[2]);
-                        _Map[idx] = bef;
+                        idx2D = GetIdx2D(aB[0], aB[1], aB[2]);
+                        _Map[idx2D] = bef;
                     }
                     break;
                 }
-                if (idx == centerPos_bef)
+
+                //다음 프레임에서 타게팅 된 블록인지 검사.
+                //if (idx2D.x + idx2D.y * 4096 == centerPos_bef && !reflected)
+                if (!any(idx2D - centerPos_bef) && !reflected)
                 {
                     result = float4(1, 1, 1, 1);
                     break;
                 }
+
+                //충돌한 지점의 로컬 좌표
                 float nextDimValue = aT[axisIdx] - aV[axisIdx];
-                //aT[axisIdx] -= aV[axisIdx];
+                //양수, 음수
                 float3 localPos = float3((0.5 * (aD[0] + 1) - (aT[0] - nextDimValue) * rd.x),
                                          (0.5 * (aD[1] + 1) - (aT[1] - nextDimValue) * rd.y),
                                          (0.5 * (aD[2] + 1) - (aT[2] - nextDimValue) * rd.z));
-
-                //그리드 그리기
-                if (gridEnabled)
+              
+                //if (gridEnabled && !reflected)
                 {
+                    //그리드 그리기
                     /*bool x = abs(localPos.x - 0.5) > 0.4;
                     bool y = abs(localPos.y - 0.5) > 0.4;
                     bool z = abs(localPos.z - 0.5) > 0.4;
                     if ((x && y || y && z || x && z))
                     {
-                        float4 r = 1 - Result[id.xy];
-                        r.w = 1;
-                        Result[id.xy] = r;
+                        result = 1 - result;
+                        result.w = 1;
                     }*/
-                    
-                    if (length(cross(0.5 - localPos, rd)) > 0.3)
+
+                    //구 모양 블록
+                    /*if (length(cross(0.5 - localPos, rd)) > 0.3)
                     {
                         result = float4(0, 0, 0, 1);
                        // aT[axisIdx] += aV[axisIdx];
                         finished = false;
-                    }
+                    }*/
                     //else  Result[id.xy] = 1;
+
+                    //분기문 대체
+                    float4 resultColors[2] = { result, 1 - result };
+                    result = resultColors[DrawGrid(localPos, distance(float3(aB[0], aB[1], aB[2]) + localPos, ro), 0.003) * gridEnabled * !reflected];
                 }
                 //광원과의 접촉 여부 검사
                 if (lightEnabled && finished)
                 {
-                    aB[axisIdx] -= aD[axisIdx];
-
-
-                    ro.x = aB[0] + localPos.x;
-                    ro.y = aB[1] + localPos.y;
-                    ro.z = aB[2] + localPos.z;
-                    rd = lightPos - ro;
-                    rd = normalize(rd);
-                    
-
-                    float intensity = 0;
-                    if (axisIdx == 0) intensity = abs(rd.x);
-                    if (axisIdx == 1) intensity = abs(rd.y);
-                    if (axisIdx == 2) intensity = abs(rd.z);
-
-                   // result *= intensity * 2;
-
-                   
-                    float distance = clamp(length(lightPos - ro), 0, 500);
-                    d = sign(rd);
-                    aD[0] = d.x;
-                    aD[1] = d.y;
-                    aD[2] = d.z;
-
-                    val = 1 / abs(rd);
-                    aV[0] = val.x;
-                    aV[1] = val.y;
-                    aV[2] = val.z;
-
-                    target = float3((0.5 * (d + 1) - localPos) / rd);
-                    aT[0] = target.x;
-                    aT[1] = target.y;
-                    aT[2] = target.z;
-                    dist = 0;
-
-                    //while (dist < MAX_STEPS)
-                    //float4 r = Result[id.xy];
-                    
-                    
-                    for (int j = 0; j < MAX_STEPS; j++)
+                    if (reflected)
                     {
-                        dist = sqrt(pow(aT[0] * rd.x, 2) + pow(aT[1] * rd.y, 2) + pow(aT[2] * rd.z, 2));
-                        //dist = sqrt(pow(aB[0] - ro.x, 2) + pow(aB[1] - ro.y, 2) + pow(aB[2] - ro.z, 2));
-                        idx = PosToIdx(aB[0], aB[1], aB[2]);
-
-                        //r *= 0.99;
-                        if (distance < dist)
+                        //if (idx2D.x + idx2D.y * 4096 == light_dest)
+                        /*if(!any(idx2D - light_dest))
                         {
-                            //Result[id.xy] = r;
-                            break;
-                        }
-
-                        //광원 경로 중 장애물 있을 경우.
-                        if (_Map[idx].w != 0)
-                        {
-                            result *= 0.2;
-                            //if (_Map[idx].w == 0.1) //거울
-                            //{
-                            //    aD[axisIdx] *= -1; // 진행방향 반전
-                            //    aB[axisIdx] += aD[axisIdx]; // 뒤로 후퇴
-                           // }
-                            //else
-                            break;
-                        }
-                        axisIdx = 0;
-                        if (aT[1] < aT[axisIdx]) axisIdx = 1;
-                        if (aT[2] < aT[axisIdx]) axisIdx = 2;
-                        aT[axisIdx] += aV[axisIdx];
-                        aB[axisIdx] += aD[axisIdx];
+                            
+                        }*/
+                        //step 활용하여 분기문 대체
+                        result += step(length(idx2D - light_dest), 0) * result * 4 * length(light_incidence * rd) * float4(1.2, 1.2, 1, 1);
+                        break;
                     }
-                    break;
+                    else
+                    {
+                        reflected = true;
+                        //aB[axisIdx] -= aD[axisIdx];
+                        float3 lightDir = normalize(float3(aB[0], aB[1], aB[2]) + localPos - lightPos);
+                        result *= 0.2;
+
+                        float anD[3] = { 0,0,0 };
+                        anD[axisIdx] = 1 / aV[axisIdx] * aD[axisIdx];
+                        float3 nextDir = float3(anD[0], anD[1], anD[2]);
+                        if(dot(lightDir, nextDir) <= 0) break;
+
+                        light_dest = idx2D; //idx2D.x + idx2D.y * 4096;//idx;
+                        light_incidence = nextDir * val;
+
+                        ro = lightPos;
+                        rd = lightDir;
+                        aB[0] = floor(ro.x);
+                        aB[1] = floor(ro.y);
+                        aB[2] = floor(ro.z);
+
+                        d = sign(rd);
+                        aD[0] = d.x;
+                        aD[1] = d.y;
+                        aD[2] = d.z;
+
+                        val = 1 / abs(rd); //가중치. 요소의 값이 작을수록 더해지는 값이 더 커짐.
+                        aV[0] = val.x;
+                        aV[1] = val.y;
+                        aV[2] = val.z;
+
+                        target = float3((0.5 * (d + 1) - float3(ro.x - aB[0], ro.y - aB[1], ro.z - aB[2])) / rd); //초기 더해진 가중치 계산
+                        aT[0] = target.x;
+                        aT[1] = target.y;
+                        aT[2] = target.z;
+
+                        axisIdx = 0; // 0 == x, 1 == y, 2 == z
+                        continue;
+                    }
                 }
                 if(finished) break;
+            }
+            else if (_Map[idx2D].w == 0.1) //거울
+            {
+                aB[axisIdx] -= aD[axisIdx]; // 뒤로 후퇴
+               // aT[axisIdx] -= aV[axisIdx];
+                aD[axisIdx] *= -1; // 진행방향 반전
             }
         }
         /*else if (aB[0] == lightPos.x && aB[1] == lightPos.y && aB[2] == lightPos.z)
         {
             Result[id.xy] = 1;
         }*/
+        
         axisIdx = 0;
-        if (aT[1] < aT[axisIdx]) axisIdx = 1;
-        if (aT[2] < aT[axisIdx]) axisIdx = 2;
+
+        //step 활용하여 분기문 대체
+        axisIdx = step(aT[1], aT[axisIdx]);
+        axisIdx = max(step(aT[2], aT[axisIdx]) * 2, axisIdx);
+        //if (aT[1] < aT[axisIdx]) axisIdx = 1;
+        //if (aT[2] < aT[axisIdx]) axisIdx = 2;
         aT[axisIdx] += aV[axisIdx];
         aB[axisIdx] += aD[axisIdx];
+
+        //step 활용하여 분기문 대체
+        count += (step(mapSize.x, aB[axisIdx]) + step(aB[axisIdx], -1)) * MAX_STEPS;
+        //if (aB[axisIdx] >= mapSize.x || aB[axisIdx] < 0) break; //범위 채크
     }
     result.w = 1;
     Result[id.xy] = result;
 }
 float3 rot(float3 p, float3 a)
 {
-    float sx = sin(a.x);
-    float cx = cos(a.x);
-
-    float sy = sin(a.y);
-    float cy = cos(a.y);
+    float sx, cx, sy, cy;
+    sincos(a.x, sx, cx);
+    sincos(a.y, sy, cy);
 
     p = float3(p.x, p.y * cx - p.z * sx, p.y * sx + p.z * cx);
     p = float3(p.x * cy - p.z * sy, p.y, p.x * sy + p.z * cy);
@@ -250,14 +259,3 @@ void Kernel1 (int3 id : SV_DispatchThreadID)
     VoxelTrav(id, ro, rd);
 
 }
-
-/*[numthreads(8,8,1)]
-void Kernel2 (int3 id : SV_DispatchThreadID)
-{
-    bool x = idxData[id.xy].x > 0.45;
-    bool y = idxData[id.xy].y > 0.45;
-    bool z = idxData[id.xy].z > 0.45;
-    if( x && y || y && z || x && z) Result[id.xy] = float4(1,1,1,1);
-
-   // else Result[id.xy] = float4(0,0,0,0);
-}*/

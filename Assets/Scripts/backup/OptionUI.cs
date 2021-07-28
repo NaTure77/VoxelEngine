@@ -22,7 +22,9 @@ public class OptionUI : MonoBehaviour
 
     private void Start()
     {
-        ActivateUI(true);
+        Cursor.visible = false;
+        Cursor.lockState = Cursor.visible ? CursorLockMode.None : CursorLockMode.Locked;
+        //ActivateUI(true);
         Controller2.instance.inputManager.Player.Esc.performed += val =>
         {
             ToggleUI();
@@ -67,8 +69,8 @@ public class OptionUI : MonoBehaviour
     void ActivateUI(bool activate)
     {
         optionPanel.SetActive(activate);
-        //Cursor.visible = activate;
-        //Cursor.lockState = Cursor.visible ? CursorLockMode.None : CursorLockMode.Locked;
+        Cursor.visible = activate;
+        Cursor.lockState = Cursor.visible ? CursorLockMode.None : CursorLockMode.Locked;
 
         if (activate)
         {
